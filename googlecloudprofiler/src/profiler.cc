@@ -151,7 +151,7 @@ void Profiler::Handle(int signum, siginfo_t *info, void *context) {
   // there are ways to avoid the problems.
   PyThreadState *ts = get_thread_state_func();
 
-  trace.num_frames = PopulateFrames(frames, ts);
+  trace.num_frames = PopulateFramesGuarded(frames, ts);
   if (!fixed_traces_->Add(&trace)) {
     unknown_stack_count_++;
     return;
@@ -159,6 +159,11 @@ void Profiler::Handle(int signum, siginfo_t *info, void *context) {
 }
 
 void GetFuncLoc(PyCodeObject *code_object, FuncLoc *func_loc) {
+  if (code_object == nullptr) {
+    func_loc->name = "unknown";
+    func_loc->filename = "unknown";
+    return;
+  }
   // Note that PyUnicode_AsUTF8 caches the char array in the unicodeobject
   // and the memory is released when the unicodeobject is deallocated.
   const char *name = PyUnicode_AsUTF8(code_object->co_name);
@@ -171,6 +176,11 @@ void GetFuncLoc(PyCodeObject *code_object, FuncLoc *func_loc) {
 // otherwise PyCode_Type.tp_dealloc may be updating
 // CodeDeallocHook.deallocated_code_ in another thread.
 void Profiler::Reset() {
+  // Set up the frame-walk safety mechanisms before the SIGPROF handler can
+  // run (GIL held here): the readability-probe pipe and the SIGSEGV/SIGBUS
+  // fault guard.
+  InitFramePointerProbe();
+  InstallFrameWalkFaultGuard();
   if (fixed_traces_ == nullptr) {
     fixed_traces_ = new AsyncSafeTraceMultiset();
   } else {
