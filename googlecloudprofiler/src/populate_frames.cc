@@ -32,6 +32,14 @@ bool SafeCopy(void *dst, const void *src, size_t n) {
   return got == static_cast<long>(n);
 }
 
+// Absolute cap on frames walked per SIGPROF sample. num_frames only advances for
+// complete frames, so a cycle of incomplete/stale frames -- e.g. a torn
+// `previous` link left by a SIGPROF landing mid frame push/pop -- would otherwise
+// spin this walk forever inside the signal handler (GIL held), wedging the
+// process. 4x the capture cap leaves headroom for legitimately skipped frames
+// (C-stack shims, prologue frames).
+static const int kMaxWalkIterations = 4 * kMaxFramesToCapture;
+
 #if PY_VERSION_HEX >= PY_313
 
 /**
@@ -92,7 +100,9 @@ int PopulateFrames(CallFrame *frames, PyThreadState *ts) {
 
   _PyInterpreterFrame *faddr = ts->current_frame;
   int num_frames = 0;
-  while (faddr != nullptr && num_frames < kMaxFramesToCapture) {
+  int steps = 0;
+  while (faddr != nullptr && num_frames < kMaxFramesToCapture &&
+         ++steps <= kMaxWalkIterations) {
     _PyInterpreterFrame fr;
     if (!SafeCopy(&fr, faddr, sizeof(fr))) {
       break;  // unreadable frame: stop, keep the frames gathered so far
@@ -107,6 +117,9 @@ int PopulateFrames(CallFrame *frames, PyThreadState *ts) {
       frames[num_frames].lineno = static_cast<int>(
           (fr.instr_ptr - _PyCode_CODE(code)) * sizeof(_Py_CODEUNIT));
       num_frames++;
+    }
+    if (fr.previous == faddr) {
+      break;  // self-referential link: stop instead of spinning
     }
     faddr = fr.previous;
   }
@@ -174,7 +187,9 @@ int PopulateFrames(CallFrame *frames, PyThreadState *ts) {
   }
 
   int num_frames = 0;
-  while (faddr != nullptr && num_frames < kMaxFramesToCapture) {
+  int steps = 0;
+  while (faddr != nullptr && num_frames < kMaxFramesToCapture &&
+         ++steps <= kMaxWalkIterations) {
     _PyInterpreterFrame fr;
     if (!SafeCopy(&fr, faddr, sizeof(fr))) {
       break;  // unreadable frame: stop, keep the frames gathered so far
@@ -187,6 +202,9 @@ int PopulateFrames(CallFrame *frames, PyThreadState *ts) {
       frames[num_frames].lineno = static_cast<int>(
           (fr.prev_instr - _PyCode_CODE(fr.f_code)) * sizeof(_Py_CODEUNIT));
       num_frames++;
+    }
+    if (fr.previous == faddr) {
+      break;  // self-referential link: stop instead of spinning
     }
     faddr = fr.previous;
   }
@@ -248,7 +266,9 @@ int PopulateFrames(CallFrame *frames, PyThreadState *ts) {
   }
 
   int num_frames = 0;
-  while (faddr != nullptr && num_frames < kMaxFramesToCapture) {
+  int steps = 0;
+  while (faddr != nullptr && num_frames < kMaxFramesToCapture &&
+         ++steps <= kMaxWalkIterations) {
     _PyInterpreterFrame fr;
     if (!SafeCopy(&fr, faddr, sizeof(fr))) {
       break;  // unreadable frame: stop, keep the frames gathered so far
@@ -261,6 +281,9 @@ int PopulateFrames(CallFrame *frames, PyThreadState *ts) {
       frames[num_frames].lineno = static_cast<int>(
           (fr.prev_instr - _PyCode_CODE(fr.f_code)) * sizeof(_Py_CODEUNIT));
       num_frames++;
+    }
+    if (fr.previous == faddr) {
+      break;  // self-referential link: stop instead of spinning
     }
     faddr = fr.previous;
   }
