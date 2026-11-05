@@ -17,6 +17,7 @@
 
 # setup.py reads the version information from here to set package version
 # Glean fork: upstream 4.1.0 + 3.12/3.13 support (vendored as 4.2.0) + the
-# SIGPROF frame-walk crash fix (copy-the-chain). Patch bump over the synthetic
-# 4.2.0 -- the fix is a backward-compatible bug fix. Upstream has no 4.2.x.
-__version__ = '4.2.1'
+# SIGPROF frame-walk crash fix (copy-the-chain, 4.2.1) + a bound on the frame
+# walk to prevent an infinite loop on a torn/cyclic `previous` chain (4.2.2).
+# Backward-compatible bug fixes; upstream has no 4.2.x.
+__version__ = '4.2.2'
